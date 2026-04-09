@@ -9,8 +9,7 @@ TOKEN = "8500723553:AAE_PFiZ3eqlP3ep-oormYXiksCfyivkXGw"
 
 from aiogram.client.session.aiohttp import AiohttpSession
 
-session = AiohttpSession(proxy="http://IP:PORT")
-bot = Bot(token=TOKEN, session=session)
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 
