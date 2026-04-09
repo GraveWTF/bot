@@ -3,16 +3,18 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
-TOKEN = "ТВОЙ_ТОКЕН"
-ADMIN_ID = 123456789  # твой id
+TOKEN = "8500723553:AAE_PFiZ3eqlP3ep-oormYXiksCfyivkXGw"
+ADMIN_ID = 123456789  # вставь свой id
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
+# 📦 данные
 users_cart = {}
 user_state = {}
+user_data = {}
 
-# 📦 Товары
+# 🛍 товары
 products = {
     "ALFA VAPE 50MG 30ML": {
         "image": "images/1.jpg",
@@ -40,46 +42,45 @@ products = {
     }
 }
 
-# 🏠 Главное меню
+# 🏠 меню
 def main_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("🛍 Товары"))
     kb.add(KeyboardButton("🧺 Корзина"))
     return kb
 
-# ▶️ Старт
+# ▶️ старт
 @dp.message_handler(commands=['start'])
 async def start(msg: types.Message):
     users_cart[msg.from_user.id] = []
+    user_state[msg.from_user.id] = None
     await msg.answer("Добро пожаловать 🔥", reply_markup=main_menu())
 
-# 🛍 Товары
+# 🛍 показать товары
 @dp.message_handler(lambda m: m.text == "🛍 Товары")
 async def show_products(msg: types.Message):
     kb = InlineKeyboardMarkup()
     for name in products:
-        kb.add(InlineKeyboardButton(name, callback_data=f"prod_{name}"))
+        kb.add(InlineKeyboardButton(name, callback_data=f"prod|{name}"))
     await msg.answer("Выбери товар:", reply_markup=kb)
 
-# 📦 Выбор товара
-@dp.callback_query_handler(lambda c: c.data.startswith("prod_"))
+# 📦 выбор товара
+@dp.callback_query_handler(lambda c: c.data.startswith("prod|"))
 async def select_product(call: types.CallbackQuery):
-    name = call.data.replace("prod_", "")
+    name = call.data.split("|")[1]
     product = products[name]
 
     kb = InlineKeyboardMarkup()
     for f in product["flavors"]:
-        kb.add(InlineKeyboardButton(f, callback_data=f"flavor_{name}_{f}"))
+        kb.add(InlineKeyboardButton(f, callback_data=f"flavor|{name}|{f}"))
 
-    photo = open(product["image"], "rb")
-    await bot.send_photo(call.from_user.id, photo, caption=name, reply_markup=kb)
+    with open(product["image"], "rb") as photo:
+        await bot.send_photo(call.from_user.id, photo, caption=name, reply_markup=kb)
 
-# 🍓 Выбор вкуса → в корзину
-@dp.callback_query_handler(lambda c: c.data.startswith("flavor_"))
+# ➕ добавить в корзину
+@dp.callback_query_handler(lambda c: c.data.startswith("flavor|"))
 async def add_to_cart(call: types.CallbackQuery):
-    data = call.data.split("_")
-    name = data[1]
-    flavor = data[2]
+    _, name, flavor = call.data.split("|")
 
     users_cart[call.from_user.id].append(f"{name} ({flavor})")
 
@@ -89,11 +90,18 @@ async def add_to_cart(call: types.CallbackQuery):
 
     await call.message.answer("Добавлено в корзину ✅", reply_markup=kb)
 
-# 🧺 Показ корзины
-@dp.callback_query_handler(lambda c: c.data == "cart")
+# 🧺 корзина (кнопка)
 @dp.message_handler(lambda m: m.text == "🧺 Корзина")
-async def show_cart(msg_or_call):
-    user_id = msg_or_call.from_user.id
+async def cart_message(msg: types.Message):
+    await show_cart(msg.from_user.id)
+
+# 🧺 корзина (callback)
+@dp.callback_query_handler(lambda c: c.data == "cart")
+async def cart_callback(call: types.CallbackQuery):
+    await show_cart(call.from_user.id)
+
+# 📋 логика корзины
+async def show_cart(user_id):
     cart = users_cart.get(user_id, [])
 
     if not cart:
@@ -109,29 +117,32 @@ async def show_cart(msg_or_call):
 
     await bot.send_message(user_id, text, reply_markup=kb)
 
-# 💳 Оформление
+# 💳 оформление
 @dp.callback_query_handler(lambda c: c.data == "checkout")
 async def checkout(call: types.CallbackQuery):
     user_state[call.from_user.id] = "address"
     await call.message.answer("Введи адрес:")
 
-# 📍 Адрес
+# 📍 адрес
 @dp.message_handler(lambda m: user_state.get(m.from_user.id) == "address")
 async def get_address(msg: types.Message):
+    user_data[msg.from_user.id] = {"address": msg.text}
     user_state[msg.from_user.id] = "phone"
-    msg.bot_data = {"address": msg.text}
     await msg.answer("Введи номер телефона:")
 
-# 📞 Телефон
+# 📞 телефон
 @dp.message_handler(lambda m: user_state.get(m.from_user.id) == "phone")
 async def get_phone(msg: types.Message):
     user_id = msg.from_user.id
     cart = users_cart[user_id]
 
-    text = f"🆕 Заказ\n\n"
+    address = user_data[user_id]["address"]
+
+    text = "🆕 Заказ\n\n"
     for item in cart:
         text += f"• {item}\n"
 
+    text += f"\n📍 {address}"
     text += f"\n📞 {msg.text}"
 
     await bot.send_message(ADMIN_ID, text)
@@ -140,6 +151,6 @@ async def get_phone(msg: types.Message):
     users_cart[user_id] = []
     user_state[user_id] = None
 
-# ▶️ Запуск
+# ▶️ запуск
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
