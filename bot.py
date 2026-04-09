@@ -1,131 +1,145 @@
 import asyncio
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
-from aiogram.filters import Command
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.context import FSMContext
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils import executor
 
-TOKEN = "8500723553:AAE_PFiZ3eqlP3ep-oormYXiksCfyivkXGw"
-
-from aiogram.client.session.aiohttp import AiohttpSession
+TOKEN = "ТВОЙ_ТОКЕН"
+ADMIN_ID = 123456789  # твой id
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
+users_cart = {}
+user_state = {}
 
-# ---------- FSM ----------
-class OrderState(StatesGroup):
-    choosing_flavor = State()
-    waiting_address = State()
-    waiting_phone = State()
+# 📦 Товары
+products = {
+    "ALFA VAPE 50MG 30ML": {
+        "image": "images/1.jpg",
+        "flavors": ["Лесные ягоды", "Клубника банан"]
+    },
+    "D.L.T.A ENERGY 50MG 30ML": {
+        "image": "images/2.jpg",
+        "flavors": ["Red bull арбуз", "Monster", "Burn красный", "Adrenaline ягоды", "Adrenaline Rush"]
+    },
+    "ARQA 100MG": {
+        "image": "images/3.jpg",
+        "flavors": ["Тропический микс слим", "Ред булл слим", "Кислый грейпфрут", "Арбузная жвачка слим"]
+    },
+    "ARQA 150MG": {
+        "image": "images/4.jpg",
+        "flavors": ["Арбуз дыня"]
+    },
+    "XROS 0.4": {
+        "image": "images/5.jpg",
+        "flavors": ["Картридж"]
+    },
+    "XROS 0.6": {
+        "image": "images/6.jpg",
+        "flavors": ["Картридж"]
+    }
+}
 
+# 🏠 Главное меню
+def main_menu():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("🛍 Товары"))
+    kb.add(KeyboardButton("🧺 Корзина"))
+    return kb
 
-# ---------- Клавиатуры ----------
-main_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🛍 Товар")],
-        [KeyboardButton(text="🛒 Корзина")],
-        [KeyboardButton(text="📞 Поддержка")]
-    ],
-    resize_keyboard=True
-)
+# ▶️ Старт
+@dp.message_handler(commands=['start'])
+async def start(msg: types.Message):
+    users_cart[msg.from_user.id] = []
+    await msg.answer("Добро пожаловать 🔥", reply_markup=main_menu())
 
-flavors_kb = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="Черная смородина", callback_data="flavor_смородина")],
-        [InlineKeyboardButton(text="Морс", callback_data="flavor_морс")],
-        [InlineKeyboardButton(text="Грейпфрут", callback_data="flavor_грейпфрут")],
-        [InlineKeyboardButton(text="Гранат смородина", callback_data="flavor_гранат")],
-        [InlineKeyboardButton(text="Ананас", callback_data="flavor_ананас")],
-        [InlineKeyboardButton(text="Банан", callback_data="flavor_банан")]
-    ]
-)
+# 🛍 Товары
+@dp.message_handler(lambda m: m.text == "🛍 Товары")
+async def show_products(msg: types.Message):
+    kb = InlineKeyboardMarkup()
+    for name in products:
+        kb.add(InlineKeyboardButton(name, callback_data=f"prod_{name}"))
+    await msg.answer("Выбери товар:", reply_markup=kb)
 
+# 📦 Выбор товара
+@dp.callback_query_handler(lambda c: c.data.startswith("prod_"))
+async def select_product(call: types.CallbackQuery):
+    name = call.data.replace("prod_", "")
+    product = products[name]
 
-# ---------- Старт ----------
-@dp.message(Command("start"))
-async def start(message: Message):
-    await message.answer("Добро пожаловать в магазин!", reply_markup=main_kb)
+    kb = InlineKeyboardMarkup()
+    for f in product["flavors"]:
+        kb.add(InlineKeyboardButton(f, callback_data=f"flavor_{name}_{f}"))
 
+    photo = open(product["image"], "rb")
+    await bot.send_photo(call.from_user.id, photo, caption=name, reply_markup=kb)
 
-# ---------- Раздел товар ----------
-@dp.message(F.text == "🛍 Товар")
-async def show_product(message: Message, state: FSMContext):
-    photo = FSInputFile("image.png")  # файл картинки рядом с ботом
+# 🍓 Выбор вкуса → в корзину
+@dp.callback_query_handler(lambda c: c.data.startswith("flavor_"))
+async def add_to_cart(call: types.CallbackQuery):
+    data = call.data.split("_")
+    name = data[1]
+    flavor = data[2]
 
-    await message.answer_photo(
-        photo=photo,
-        caption="📦 IZI salt 50mg 30 ml\n\nВыберите вкус:",
-        reply_markup=flavors_kb
-    )
-    await state.set_state(OrderState.choosing_flavor)
+    users_cart[call.from_user.id].append(f"{name} ({flavor})")
 
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("➕ Ещё", callback_data="more"))
+    kb.add(InlineKeyboardButton("🧺 Корзина", callback_data="cart"))
 
-# ---------- Выбор вкуса ----------
-@dp.callback_query(F.data.startswith("flavor_"))
-async def choose_flavor(callback, state: FSMContext):
-    flavor = callback.data.split("_")[1]
+    await call.message.answer("Добавлено в корзину ✅", reply_markup=kb)
 
-    await state.update_data(flavor=flavor)
+# 🧺 Показ корзины
+@dp.callback_query_handler(lambda c: c.data == "cart")
+@dp.message_handler(lambda m: m.text == "🧺 Корзина")
+async def show_cart(msg_or_call):
+    user_id = msg_or_call.from_user.id
+    cart = users_cart.get(user_id, [])
 
-    await callback.message.answer("📍 Введите ваш адрес:")
-    await state.set_state(OrderState.waiting_address)
+    if not cart:
+        await bot.send_message(user_id, "Корзина пустая ❌")
+        return
 
+    text = "🧺 Твоя корзина:\n\n"
+    for item in cart:
+        text += f"• {item}\n"
 
-# ---------- Адрес ----------
-@dp.message(OrderState.waiting_address)
-async def get_address(message: Message, state: FSMContext):
-    await state.update_data(address=message.text)
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("✅ Оформить", callback_data="checkout"))
 
-    await message.answer("📞 Введите номер телефона:")
-    await state.set_state(OrderState.waiting_phone)
+    await bot.send_message(user_id, text, reply_markup=kb)
 
+# 💳 Оформление
+@dp.callback_query_handler(lambda c: c.data == "checkout")
+async def checkout(call: types.CallbackQuery):
+    user_state[call.from_user.id] = "address"
+    await call.message.answer("Введи адрес:")
 
-# ---------- Телефон ----------
-@dp.message(OrderState.waiting_phone)
-async def get_phone(message: Message, state: FSMContext):
-    data = await state.get_data()
+# 📍 Адрес
+@dp.message_handler(lambda m: user_state.get(m.from_user.id) == "address")
+async def get_address(msg: types.Message):
+    user_state[msg.from_user.id] = "phone"
+    msg.bot_data = {"address": msg.text}
+    await msg.answer("Введи номер телефона:")
 
-    flavor = data["flavor"]
-    address = data["address"]
-    phone = message.text
+# 📞 Телефон
+@dp.message_handler(lambda m: user_state.get(m.from_user.id) == "phone")
+async def get_phone(msg: types.Message):
+    user_id = msg.from_user.id
+    cart = users_cart[user_id]
 
-    text = (
-        f"🛒 Заказ:\n"
-        f"Товар: IZI salt 50mg 30 ml\n"
-        f"Вкус: {flavor}\n"
-        f"Адрес: {address}\n"
-        f"Телефон: {phone}"
-    )
+    text = f"🆕 Заказ\n\n"
+    for item in cart:
+        text += f"• {item}\n"
 
-    manager_link = f"https://t.me/HexStoreManager?text={text}"
+    text += f"\n📞 {msg.text}"
 
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📩 Связаться с менеджером", url=manager_link)]
-        ]
-    )
+    await bot.send_message(ADMIN_ID, text)
+    await msg.answer("Заказ оформлен ✅")
 
-    await message.answer("Нажмите кнопку ниже для оформления заказа:", reply_markup=kb)
+    users_cart[user_id] = []
+    user_state[user_id] = None
 
-    await state.clear()
-
-
-# ---------- Поддержка ----------
-@dp.message(F.text == "📞 Поддержка")
-async def support(message: Message):
-    await message.answer("Связь с поддержкой: @HexStoreManager")
-
-
-# ---------- Корзина ----------
-@dp.message(F.text == "🛒 Корзина")
-async def cart(message: Message):
-    await message.answer("🛒 Корзина пока пустая")
-
-
-# ---------- Запуск ----------
-async def main():
-    await dp.start_polling(bot)
-
+# ▶️ Запуск
 if __name__ == "__main__":
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True)
