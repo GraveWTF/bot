@@ -150,7 +150,7 @@ async def get_phone(message: types.Message, address):
 """
 
     # ВСТАВЬ СВОЙ ID
-    ADMIN_ID = 123456789
+    ADMIN_ID = 7305195223
 
     await bot.send_message(ADMIN_ID, text)
     await message.answer("Заказ оформлен ✅")
