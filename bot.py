@@ -1,46 +1,50 @@
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-API_TOKEN = "8500723553:AAE_PFiZ3eqlP3ep-oormYXiksCfyivkXGw"
+API_TOKEN = "ТВОЙ_ТОКЕН"
+ADMIN_ID = 123456789
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher(bot, storage=MemoryStorage())
 
-# Корзины пользователей
+# --- СОСТОЯНИЯ ---
+class OrderState(StatesGroup):
+    address = State()
+    phone = State()
+
+# --- КОРЗИНА ---
 user_cart = {}
 
 # --- ТОВАРЫ ---
 products = {
     "IZI salt 50mg 30ml": [
-        "гранат смородина",
-        "морс",
-        "черная смородина"
+        "Гранат смородина",
+        "Морс",
+        "Черная смородина"
     ],
     "PODONKI PODGON 35mg 30ml": [
-        "дыня банан",
-        "ежевичный лимонад",
-        "земляничная конфета",
-        "кислые червяки",
-        "лесные ягоды",
-        "тропические фрукты"
+        "Дыня банан",
+        "Ежевичный лимонад",
+        "Земляничная конфета",
+        "Кислые червяки",
+        "Лесные ягоды",
+        "Тропические фрукты"
     ],
     "WAKA 60mg 30ml": [
-        "банан дыня",
-        "вишня арбуз",
-        "ежевичная волна"
+        "Банан дыня",
+        "Вишня арбуз",
+        "Ежевичная волна"
     ],
     "Картриджи VAPORESSO XROS 0.4 3ml": [],
     "Картриджи VAPORESSO XROS 0.6 2ml": []
 }
-
-# --- КНОПКИ ---
-main_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-main_kb.add(KeyboardButton("🛍 Товары"))
-main_kb.add(KeyboardButton("🛒 Корзина"))
 
 # --- СТАРТ ---
 @dp.message_handler(commands=['start'])
@@ -55,28 +59,30 @@ async def start(message: types.Message):
 Северодвинск (12:00 — 21:00)
 """
 
-    # ВСТАВЬ СЮДА СВОЮ КАРТИНКУ В ПАПКУ И НАЗОВИ banner.png
-    with open("banner.png", "rb") as photo:
-        await bot.send_photo(message.chat.id, photo, caption=text, reply_markup=main_kb)
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🛍 Товары", callback_data="products"))
+    kb.add(InlineKeyboardButton("🛒 Корзина", callback_data="cart"))
 
-# --- ТОВАРЫ ---
-@dp.message_handler(lambda m: m.text == "🛍 Товары")
-async def show_products(message: types.Message):
+    with open("banner.png", "rb") as photo:
+        await bot.send_photo(message.chat.id, photo, caption=text, reply_markup=kb)
+
+# --- СПИСОК ТОВАРОВ ---
+@dp.callback_query_handler(lambda c: c.data == "products")
+async def show_products(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup()
     for name in products:
         kb.add(InlineKeyboardButton(name, callback_data=f"product_{name}"))
-    await message.answer("Выбери товар:", reply_markup=kb)
+    await call.message.answer("Выбери товар:", reply_markup=kb)
 
 # --- ВЫБОР ТОВАРА ---
 @dp.callback_query_handler(lambda c: c.data.startswith("product_"))
 async def choose_product(call: types.CallbackQuery):
     product = call.data.replace("product_", "")
-
     flavors = products[product]
 
     if not flavors:
         add_to_cart(call.from_user.id, product)
-        await call.message.answer(f"{product} добавлен в корзину ✅")
+        await call.message.answer("Добавлено в корзину ✅")
         return
 
     kb = InlineKeyboardMarkup()
@@ -85,7 +91,7 @@ async def choose_product(call: types.CallbackQuery):
 
     await call.message.answer(f"{product}\nВыбери вкус:", reply_markup=kb)
 
-# --- ДОБАВИТЬ В КОРЗИНУ ---
+# --- ДОБАВИТЬ ---
 @dp.callback_query_handler(lambda c: c.data.startswith("add_"))
 async def add_product(call: types.CallbackQuery):
     data = call.data.replace("add_", "")
@@ -94,24 +100,23 @@ async def add_product(call: types.CallbackQuery):
     add_to_cart(call.from_user.id, f"{product} ({flavor})")
 
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("➕ Добавить ещё", callback_data="more"))
-    kb.add(InlineKeyboardButton("🛒 Перейти в корзину", callback_data="cart"))
+    kb.add(InlineKeyboardButton("➕ Добавить ещё", callback_data="products"))
+    kb.add(InlineKeyboardButton("🛒 Корзина", callback_data="cart"))
 
     await call.message.answer("Добавлено в корзину ✅", reply_markup=kb)
 
-# --- ФУНКЦИЯ КОРЗИНЫ ---
 def add_to_cart(user_id, item):
     if user_id not in user_cart:
         user_cart[user_id] = []
     user_cart[user_id].append(item)
 
-# --- ПОКАЗ КОРЗИНЫ ---
-@dp.message_handler(lambda m: m.text == "🛒 Корзина")
-async def show_cart(message: types.Message):
-    cart = user_cart.get(message.from_user.id, [])
+# --- КОРЗИНА ---
+@dp.callback_query_handler(lambda c: c.data == "cart")
+async def show_cart(call: types.CallbackQuery):
+    cart = user_cart.get(call.from_user.id, [])
 
     if not cart:
-        await message.answer("Корзина пустая ❌")
+        await call.message.answer("Корзина пустая ❌")
         return
 
     text = "🛒 Твоя корзина:\n\n"
@@ -121,22 +126,24 @@ async def show_cart(message: types.Message):
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("Оформить заказ", callback_data="order"))
 
-    await message.answer(text, reply_markup=kb)
+    await call.message.answer(text, reply_markup=kb)
 
 # --- ОФОРМЛЕНИЕ ---
 @dp.callback_query_handler(lambda c: c.data == "order")
 async def order(call: types.CallbackQuery):
-    await call.message.answer("Введите адрес доставки:")
-    dp.register_message_handler(get_address, state=None)
+    await call.message.answer("Введите адрес:")
+    await OrderState.address.set()
 
-async def get_address(message: types.Message):
-    user_id = message.from_user.id
-    address = message.text
-
+@dp.message_handler(state=OrderState.address)
+async def get_address(message: types.Message, state: FSMContext):
+    await state.update_data(address=message.text)
     await message.answer("Введите номер телефона:")
-    dp.register_message_handler(lambda m: get_phone(m, address), state=None)
+    await OrderState.phone.set()
 
-async def get_phone(message: types.Message, address):
+@dp.message_handler(state=OrderState.phone)
+async def get_phone(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    address = data['address']
     phone = message.text
     cart = user_cart.get(message.from_user.id, [])
 
@@ -149,13 +156,11 @@ async def get_phone(message: types.Message, address):
 📞 Телефон: {phone}
 """
 
-    # ВСТАВЬ СВОЙ ID
-    ADMIN_ID = 7305195223
-
     await bot.send_message(ADMIN_ID, text)
     await message.answer("Заказ оформлен ✅")
 
     user_cart[message.from_user.id] = []
+    await state.finish()
 
 # --- ЗАПУСК ---
 if __name__ == "__main__":
