@@ -1,63 +1,54 @@
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
-API_TOKEN = "8500723553:AAE_PFiZ3eqlP3ep-oormYXiksCfyivkXGw"
+API_TOKEN = "ТВОЙ_ТОКЕН"
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
+# 🛒 корзина
 user_cart = {}
 
+# 📦 товары
 products = {
-    "izi": {
-        "name": "IZI salt 50mg 30ml",
-        "flavors": ["Гранат смородина", "Морс", "Черная смородина"]
-    },
-    "podonki": {
-        "name": "PODONKI PODGON 35mg 30ml",
-        "flavors": [
-            "Дыня банан",
-            "Ежевичный лимонад",
-            "Земляничная конфета",
-            "Кислые червяки",
-            "Лесные ягоды",
-            "Тропические фрукты"
-        ]
-    },
-    "waka": {
-        "name": "WAKA 60mg 30ml",
-        "flavors": [
-            "Банан дыня",
-            "Вишня арбуз",
-            "Ежевичная волна"
-        ]
-    },
-    "xros04": {
-        "name": "Картриджи VAPORESSO XROS 0.4 3ml",
-        "flavors": ["Без вкуса"]
-    },
-    "xros06": {
-        "name": "Картриджи VAPORESSO XROS 0.6 2ml",
-        "flavors": ["Без вкуса"]
-    }
+    "izi": ("IZI salt 50mg 30ml", ["Гранат смородина", "Морс", "Черная смородина"]),
+    "podonki": ("PODONKI PODGON 35mg 30ml", [
+        "Дыня банан", "Ежевичный лимонад", "Земляничная конфета",
+        "Кислые червяки", "Лесные ягоды", "Тропические фрукты"
+    ]),
+    "waka": ("WAKA 60mg 30ml", ["Банан дыня", "Вишня арбуз", "Ежевичная волна"]),
+    "xros04": ("Картриджи VAPORESSO XROS 0.4 3ml", ["Без вкуса"]),
+    "xros06": ("Картриджи VAPORESSO XROS 0.6 2ml", ["Без вкуса"])
 }
 
-# 📦 товары
+# 🔥 ГЛАВНОЕ МЕНЮ
+def main_menu():
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton("📦 Товары", callback_data="products"),
+        InlineKeyboardButton("🛒 Корзина", callback_data="cart"),
+        InlineKeyboardButton("📞 Поддержка", url="https://t.me/HexStoreManager")
+    )
+    return kb
+
+# 📦 список товаров
 def products_kb():
     kb = InlineKeyboardMarkup(row_width=1)
     for key in products:
-        kb.add(InlineKeyboardButton(products[key]["name"], callback_data=f"product_{key}"))
+        kb.add(InlineKeyboardButton(products[key][0], callback_data=f"p_{key}"))
+    kb.add(InlineKeyboardButton("⬅ Назад", callback_data="back"))
     return kb
 
 # 🍓 вкусы
 def flavors_kb(key):
     kb = InlineKeyboardMarkup(row_width=1)
-    for f in products[key]["flavors"]:
-        kb.add(InlineKeyboardButton(f, callback_data=f"flavor_{key}_{f}"))
+    for f in products[key][1]:
+        kb.add(InlineKeyboardButton(f, callback_data=f"f_{key}_{f}"))
+    kb.add(InlineKeyboardButton("⬅ Назад", callback_data="products"))
     return kb
 
 # 🚀 старт
@@ -72,34 +63,39 @@ async def start(msg: types.Message):
         "Северодвинск (12:00 — 21:00)"
     )
 
-    # 🔥 КАРТИНКА (положи файл banner.jpg рядом с bot.py)
-    photo = InputFile("banner.jpg")
+    await msg.answer(text, reply_markup=main_menu())
 
-    await msg.answer_photo(photo, caption=text)
-    await msg.answer("Выбери товар:", reply_markup=products_kb())
+# 📦 открыть товары
+@dp.callback_query_handler(lambda c: c.data == "products")
+async def show_products(call: types.CallbackQuery):
+    await call.answer()
+    await call.message.edit_text("Выбери товар:", reply_markup=products_kb())
+
+# 🔙 назад
+@dp.callback_query_handler(lambda c: c.data == "back")
+async def back(call: types.CallbackQuery):
+    await call.answer()
+    await call.message.edit_text("Меню:", reply_markup=main_menu())
 
 # 📦 выбор товара
-@dp.callback_query_handler(lambda c: c.data.startswith("product_"))
+@dp.callback_query_handler(lambda c: c.data.startswith("p_"))
 async def product(call: types.CallbackQuery):
     await call.answer()
-
     key = call.data.split("_")[1]
-
-    await call.message.answer(
-        f"Выбери вкус для {products[key]['name']}:",
+    await call.message.edit_text(
+        f"Выбери вкус для {products[key][0]}:",
         reply_markup=flavors_kb(key)
     )
 
-# 🍓 выбор вкуса
-@dp.callback_query_handler(lambda c: c.data.startswith("flavor_"))
-async def flavor(call: types.CallbackQuery):
+# 🍓 добавление в корзину
+@dp.callback_query_handler(lambda c: c.data.startswith("f_"))
+async def add_to_cart(call: types.CallbackQuery):
     await call.answer()
 
     _, key, flavor = call.data.split("_", 2)
-
     user_id = call.from_user.id
 
-    item = f"{products[key]['name']} - {flavor}"
+    item = f"{products[key][0]} - {flavor}"
 
     if user_id not in user_cart:
         user_cart[user_id] = []
@@ -107,26 +103,21 @@ async def flavor(call: types.CallbackQuery):
     user_cart[user_id].append(item)
 
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("➕ Добавить ещё", callback_data="more"))
-    kb.add(InlineKeyboardButton("🛒 Корзина", callback_data="cart"))
+    kb.add(
+        InlineKeyboardButton("➕ Добавить ещё", callback_data="products"),
+        InlineKeyboardButton("🛒 Корзина", callback_data="cart")
+    )
 
-    await call.message.answer("✅ Добавлено!", reply_markup=kb)
-
-# ➕ добавить еще
-@dp.callback_query_handler(lambda c: c.data == "more")
-async def more(call: types.CallbackQuery):
-    await call.answer()
-    await call.message.answer("Выбери товар:", reply_markup=products_kb())
+    await call.message.edit_text("✅ Добавлено в корзину", reply_markup=kb)
 
 # 🛒 корзина
 @dp.callback_query_handler(lambda c: c.data == "cart")
 async def cart(call: types.CallbackQuery):
     await call.answer()
-
     uid = call.from_user.id
 
     if uid not in user_cart or not user_cart[uid]:
-        await call.message.answer("🛒 Корзина пустая")
+        await call.message.edit_text("🛒 Корзина пустая", reply_markup=main_menu())
         return
 
     text = "🛒 Ваша корзина:\n\n"
@@ -134,9 +125,12 @@ async def cart(call: types.CallbackQuery):
         text += f"• {item}\n"
 
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("✅ Оформить", callback_data="checkout"))
+    kb.add(
+        InlineKeyboardButton("✅ Оформить заказ", callback_data="checkout"),
+        InlineKeyboardButton("⬅ Назад", callback_data="back")
+    )
 
-    await call.message.answer(text, reply_markup=kb)
+    await call.message.edit_text(text, reply_markup=kb)
 
 # ✅ оформление
 @dp.callback_query_handler(lambda c: c.data == "checkout")
@@ -145,8 +139,7 @@ async def checkout(call: types.CallbackQuery):
 
     uid = call.from_user.id
 
-    if uid not in user_cart or not user_cart[uid]:
-        await call.message.answer("Корзина пустая")
+    if uid not in user_cart:
         return
 
     order = "🛒 Новый заказ:\n\n"
@@ -157,7 +150,7 @@ async def checkout(call: types.CallbackQuery):
 
     await bot.send_message("@HexStoreManager", order)
 
-    await call.message.answer("✅ Заказ отправлен!")
+    await call.message.edit_text("✅ Заказ отправлен!", reply_markup=main_menu())
 
     user_cart[uid] = []
 
