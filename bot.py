@@ -1,6 +1,6 @@
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from aiogram.utils import executor
 
 API_TOKEN = "8500723553:AAE_PFiZ3eqlP3ep-oormYXiksCfyivkXGw"
@@ -10,11 +10,8 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# 🛒 Хранилище
 user_cart = {}
-current_product = {}
 
-# 📦 Товары
 products = {
     "izi": {
         "name": "IZI salt 50mg 30ml",
@@ -49,23 +46,23 @@ products = {
     }
 }
 
-# 📋 Клавиатура товаров
-def get_products_kb():
+# 📦 товары
+def products_kb():
     kb = InlineKeyboardMarkup(row_width=1)
-    for key, item in products.items():
-        kb.add(InlineKeyboardButton(item["name"], callback_data=f"product_{key}"))
+    for key in products:
+        kb.add(InlineKeyboardButton(products[key]["name"], callback_data=f"product_{key}"))
     return kb
 
-# 📋 Клавиатура вкусов
-def get_flavors_kb(product_key):
+# 🍓 вкусы
+def flavors_kb(key):
     kb = InlineKeyboardMarkup(row_width=1)
-    for flavor in products[product_key]["flavors"]:
-        kb.add(InlineKeyboardButton(flavor, callback_data=f"flavor_{product_key}_{flavor}"))
+    for f in products[key]["flavors"]:
+        kb.add(InlineKeyboardButton(f, callback_data=f"flavor_{key}_{f}"))
     return kb
 
-# 🚀 Старт
+# 🚀 старт
 @dp.message_handler(commands=["start"])
-async def start(message: types.Message):
+async def start(msg: types.Message):
     text = (
         "HexStore - лучший магазин, с лучшими ценами по всему городу\n\n"
         "Доставка:\n"
@@ -75,30 +72,34 @@ async def start(message: types.Message):
         "Северодвинск (12:00 — 21:00)"
     )
 
-    await message.answer(text)
-    await message.answer("Выбери товар:", reply_markup=get_products_kb())
+    # 🔥 КАРТИНКА (положи файл banner.jpg рядом с bot.py)
+    photo = InputFile("banner.jpg")
 
-# 📦 Выбор товара
+    await msg.answer_photo(photo, caption=text)
+    await msg.answer("Выбери товар:", reply_markup=products_kb())
+
+# 📦 выбор товара
 @dp.callback_query_handler(lambda c: c.data.startswith("product_"))
-async def choose_product(call: types.CallbackQuery):
-    user_id = call.from_user.id
-    product_key = call.data.split("_")[1]
+async def product(call: types.CallbackQuery):
+    await call.answer()
 
-    current_product[user_id] = product_key
+    key = call.data.split("_")[1]
 
     await call.message.answer(
-        f"Выберите вкус для {products[product_key]['name']}:",
-        reply_markup=get_flavors_kb(product_key)
+        f"Выбери вкус для {products[key]['name']}:",
+        reply_markup=flavors_kb(key)
     )
 
-# 🍓 Выбор вкуса и добавление в корзину
+# 🍓 выбор вкуса
 @dp.callback_query_handler(lambda c: c.data.startswith("flavor_"))
-async def choose_flavor(call: types.CallbackQuery):
+async def flavor(call: types.CallbackQuery):
+    await call.answer()
+
+    _, key, flavor = call.data.split("_", 2)
+
     user_id = call.from_user.id
 
-    _, product_key, flavor = call.data.split("_", 2)
-
-    item = f"{products[product_key]['name']} - {flavor}"
+    item = f"{products[key]['name']} - {flavor}"
 
     if user_id not in user_cart:
         user_cart[user_id] = []
@@ -106,56 +107,60 @@ async def choose_flavor(call: types.CallbackQuery):
     user_cart[user_id].append(item)
 
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("➕ Добавить ещё", callback_data="add_more"))
+    kb.add(InlineKeyboardButton("➕ Добавить ещё", callback_data="more"))
     kb.add(InlineKeyboardButton("🛒 Корзина", callback_data="cart"))
 
-    await call.message.answer("Добавлено в корзину ✅", reply_markup=kb)
+    await call.message.answer("✅ Добавлено!", reply_markup=kb)
 
-# ➕ Добавить ещё
-@dp.callback_query_handler(lambda c: c.data == "add_more")
-async def add_more(call: types.CallbackQuery):
-    await call.message.answer("Выбери товар:", reply_markup=get_products_kb())
+# ➕ добавить еще
+@dp.callback_query_handler(lambda c: c.data == "more")
+async def more(call: types.CallbackQuery):
+    await call.answer()
+    await call.message.answer("Выбери товар:", reply_markup=products_kb())
 
-# 🛒 Корзина
+# 🛒 корзина
 @dp.callback_query_handler(lambda c: c.data == "cart")
-async def show_cart(call: types.CallbackQuery):
-    user_id = call.from_user.id
+async def cart(call: types.CallbackQuery):
+    await call.answer()
 
-    if user_id not in user_cart or not user_cart[user_id]:
+    uid = call.from_user.id
+
+    if uid not in user_cart or not user_cart[uid]:
         await call.message.answer("🛒 Корзина пустая")
         return
 
     text = "🛒 Ваша корзина:\n\n"
-    for item in user_cart[user_id]:
+    for item in user_cart[uid]:
         text += f"• {item}\n"
 
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("✅ Оформить заказ", callback_data="checkout"))
+    kb.add(InlineKeyboardButton("✅ Оформить", callback_data="checkout"))
 
     await call.message.answer(text, reply_markup=kb)
 
-# ✅ Оформление заказа
+# ✅ оформление
 @dp.callback_query_handler(lambda c: c.data == "checkout")
 async def checkout(call: types.CallbackQuery):
-    user_id = call.from_user.id
+    await call.answer()
 
-    if user_id not in user_cart or not user_cart[user_id]:
+    uid = call.from_user.id
+
+    if uid not in user_cart or not user_cart[uid]:
         await call.message.answer("Корзина пустая")
         return
 
-    order_text = "🛒 Новый заказ:\n\n"
-    for item in user_cart[user_id]:
-        order_text += f"• {item}\n"
+    order = "🛒 Новый заказ:\n\n"
+    for i in user_cart[uid]:
+        order += f"• {i}\n"
 
-    order_text += f"\n👤 @{call.from_user.username or call.from_user.id}"
+    order += f"\n👤 @{call.from_user.username or uid}"
 
-    # отправка менеджеру
-    await bot.send_message("@HexStoreManager", order_text)
+    await bot.send_message("@HexStoreManager", order)
 
     await call.message.answer("✅ Заказ отправлен!")
 
-    user_cart[user_id] = []
+    user_cart[uid] = []
 
-# ▶️ Запуск
+# ▶️ запуск
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
