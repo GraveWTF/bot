@@ -12,7 +12,10 @@ dp = Dispatcher(bot)
 
 # 🛒 корзина
 user_cart = {}
+
+# 📦 состояния
 user_state = {}
+user_data = {}
 
 # 📦 товары
 products = {
@@ -27,9 +30,9 @@ products = {
     "5": ("Картриджи VAPORESSO XROS 0.6 2ml | 300₽", ["Без вкуса"])
 }
 
-# 🔥 главное меню
+# 🔥 меню
 def main_menu():
-    kb = InlineKeyboardMarkup(row_width=1)
+    kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("📦 Товар", callback_data="products"),
         InlineKeyboardButton("🛒 Корзина", callback_data="cart"),
@@ -37,9 +40,9 @@ def main_menu():
     )
     return kb
 
-# 📦 список товаров
+# 📦 товары
 def products_kb():
-    kb = InlineKeyboardMarkup(row_width=1)
+    kb = InlineKeyboardMarkup()
     for key, val in products.items():
         kb.add(InlineKeyboardButton(val[0], callback_data=f"product_{key}"))
     kb.add(InlineKeyboardButton("⬅ Назад", callback_data="menu"))
@@ -47,7 +50,7 @@ def products_kb():
 
 # 🍓 вкусы
 def flavors_kb(key):
-    kb = InlineKeyboardMarkup(row_width=1)
+    kb = InlineKeyboardMarkup()
     for f in products[key][1]:
         kb.add(InlineKeyboardButton(f, callback_data=f"flavor_{key}_{f}"))
     kb.add(InlineKeyboardButton("⬅ Назад", callback_data="products"))
@@ -62,12 +65,6 @@ async def start(msg: types.Message):
         "Северодвинск ( 12:00 — 21:00)"
     )
     await msg.answer(text, reply_markup=main_menu())
-
-# 🔙 меню
-@dp.callback_query_handler(lambda c: c.data == "menu")
-async def menu(call: types.CallbackQuery):
-    await call.answer()
-    await call.message.edit_text("Главное меню:", reply_markup=main_menu())
 
 # 📦 открыть товары
 @dp.callback_query_handler(lambda c: c.data == "products")
@@ -97,20 +94,17 @@ async def product(call: types.CallbackQuery):
         reply_markup=flavors_kb(key)
     )
 
-# 🍓 добавление в корзину
+# 🍓 добавить в корзину
 @dp.callback_query_handler(lambda c: c.data.startswith("flavor_"))
 async def add_to_cart(call: types.CallbackQuery):
     await call.answer()
 
     _, key, flavor = call.data.split("_", 2)
-    user_id = call.from_user.id
+    uid = call.from_user.id
 
     item = f"{products[key][0]} - {flavor}"
 
-    if user_id not in user_cart:
-        user_cart[user_id] = []
-
-    user_cart[user_id].append(item)
+    user_cart.setdefault(uid, []).append(item)
 
     kb = InlineKeyboardMarkup()
     kb.add(
@@ -126,13 +120,11 @@ async def cart(call: types.CallbackQuery):
     await call.answer()
     uid = call.from_user.id
 
-    if uid not in user_cart or not user_cart[uid]:
+    if not user_cart.get(uid):
         await call.message.edit_text("🛒 Корзина пустая", reply_markup=main_menu())
         return
 
-    text = "🛒 Ваша корзина:\n\n"
-    for item in user_cart[uid]:
-        text += f"• {item}\n"
+    text = "🛒 Ваша корзина:\n\n" + "\n".join(f"• {i}" for i in user_cart[uid])
 
     kb = InlineKeyboardMarkup()
     kb.add(
@@ -149,36 +141,41 @@ async def checkout(call: types.CallbackQuery):
     user_state[call.from_user.id] = "phone"
     await call.message.answer("Введите ваш номер:")
 
-# 📱 ввод номера
+# 📱 номер
 @dp.message_handler(lambda m: user_state.get(m.from_user.id) == "phone")
 async def get_phone(msg: types.Message):
-    user_state[msg.from_user.id] = "address"
-    user_cart[msg.from_user.id].append(f"📱 Телефон: {msg.text}")
+    uid = msg.from_user.id
+    user_data[uid] = {"phone": msg.text}
+    user_state[uid] = "address"
     await msg.answer("Введите ваш адрес:")
 
-# 🏠 ввод адреса
+# 🏠 адрес
 @dp.message_handler(lambda m: user_state.get(m.from_user.id) == "address")
 async def get_address(msg: types.Message):
     uid = msg.from_user.id
-    user_cart[uid].append(f"🏠 Адрес: {msg.text}")
+    user_data[uid]["address"] = msg.text
 
     order = "🛒 Новый заказ:\n\n"
-    for item in user_cart[uid]:
+    for item in user_cart.get(uid, []):
         order += f"{item}\n"
 
+    order += f"\n📱 {user_data[uid]['phone']}"
+    order += f"\n🏠 {user_data[uid]['address']}"
     order += f"\n👤 @{msg.from_user.username or uid}"
 
     await bot.send_message("@HexStoreManager", order)
 
     await msg.answer(
-        "✅ Заказ отправлен!\nНапишите менеджеру:",
+        "✅ Заказ отправлен!",
         reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("Перейти к менеджеру", url="https://t.me/HexStoreManager")
+            InlineKeyboardButton("Написать менеджеру", url="https://t.me/HexStoreManager")
         )
     )
 
+    # очистка
     user_cart[uid] = []
     user_state[uid] = None
+    user_data[uid] = {}
 
 # ▶️ запуск
 if __name__ == "__main__":
